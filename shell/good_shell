@@ -45,6 +45,7 @@ while running:
                 os.execve(executable, keyboard, os.environ)
             except FileNotFoundError:
                 pass
+        os.write(1, ('%s: command not found (gs)\n' % keyboard[0]).encode())
         sys.exit(-1)
 
     else:
