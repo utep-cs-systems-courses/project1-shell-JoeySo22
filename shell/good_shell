@@ -20,6 +20,7 @@ def main():
     while running:
 
         keyboard = input()
+
         if not keyboard:                      # No input
             pass
 
@@ -29,68 +30,62 @@ def main():
             sys.exit(0)
             break
 
-        '''
-        Fork for midchild. Midchild handles the parsing and seperation of commands.
-        '''
-        mc_fork = os.fork()
-
-        if mc_fork < 0:
-            os.write(2, ('Could not fork process. Error code %d\n' % mc_fork).encode())
-            sys.exit(-1)
-
-
-        '''
-        Midchild processing.
-        '''
-        elif mc_fork == 0:
-            '''
-            Piping branch
-            '''
-            if '|' in keyboard:
-                cmd1, cmd2 = parse_pipe_command(keyboard) # seperates the two commands
-                s_in = os.dup(0) #Save stdin for later, s_in is stacked in file descriptor
-                s_out = os.dup(1) #Save stdout for later, s_out is also stacked
-                fd_in = os.dup(s_in) #Variable for file descriptor input, created another to the stack
-
-                # Without loop or chaining for multiple pipes.
-                pipe_r, pipe_w = os.pipe() # Get pipe file descriptors
-                os.dup2(pipe_w, 1) # Put in pipe write for stdout
-                running = exec_child_process(cmd1, True) # execute first command
-                os.dup2(pipe_r, 0) # Put in pipe read for stdin
-                os.dup2(s_out, 1) # Return stdout for stdout
-                running = exec_child_process(cmd2, False) # execute second command
-                os.dup2(s_in, 0) # Restore stdin for stdin
-                os.close(s_in)
-                os.close(s_out)
-                os.close(pipe_r)
-                os.close(pipe_w)
-
-            '''
-            Redirecting branch
-            '''
-            elif '<' in keyboard or '>' in keyboard:
-                cmd_args, out_file, in_file = parse_rd_command(keyboard) # Parse out command
-                s_out = os.dup(1) # save stdout for later to restore
-                fd_fout = os.open(out_file, os.O_WRONLY | os.O_CREAT) # Open file descriptor for a file
-                os.dup2(fd_fout, 1) # Put file fd in stdout
-                running = exec_child_process(cmd_args, False) # Execute the command
-                os.dup2(s_out, 1) # Put in stdout back into stdout
-                os.close(fd_fout)
-
-            '''
-            Background branch
-            '''
-            elif '&' is keyboard[-1]: # Check if ampersand is at the end
-                os.write(1, ('[%s] %d\n' % (keyboard.split()[0], os.getpid())).encode()) # Print the process name
-                running = exec_child_process(keyboard[:-1], True) # Execute the command but don't wait for it
-
-            '''
-            Single command branch
-            '''
-            else: running = exec_child_process(keyboard, False)
-
+        if keyboard.split()[0] == 'cd':       # Change directory command
+            os.chdir(keyboard.split()[1])
+            pass
+        
         else:
-            wait_p_fork = os.wait()
+
+            '''
+            Fork for midchild. Midchild handles the parsing and seperation of commands.
+            '''
+            mc_fork = os.fork()
+
+            if mc_fork < 0:
+                os.write(2, ('Could not fork process. Error code %d\n' % mc_fork).encode())
+                sys.exit(-1)
+
+            '''
+            Midchild processing.
+            '''
+            if mc_fork == 0:
+                if '|' in keyboard:
+                    cmd1, cmd2 = parse_pipe_command(keyboard) # seperates the two commands
+                    s_in = os.dup(0) #Save stdin for later, s_in is stacked in file descriptor
+                    s_out = os.dup(1) #Save stdout for later, s_out is also stacked
+                    fd_in = os.dup(s_in) #Variable for file descriptor input, created another to the stack
+
+                    # Without loop or chaining for multiple pipes.
+                    pipe_r, pipe_w = os.pipe() # Get pipe file descriptors
+                    os.dup2(pipe_w, 1) # Put in pipe write for stdout
+                    running = exec_child_process(cmd1, True) # execute first command
+                    os.dup2(pipe_r, 0) # Put in pipe read for stdin
+                    os.dup2(s_out, 1) # Return stdout for stdout
+                    running = exec_child_process(cmd2, False) # execute second command
+                    os.dup2(s_in, 0) # Restore stdin for stdin
+                    os.close(s_in)
+                    os.close(s_out)
+                    os.close(pipe_r)
+                    os.close(pipe_w)
+
+                elif ('<' in keyboard) or ('>' in keyboard):
+                    cmd_args, out_file, in_file = parse_rd_command(keyboard) # Parse out command
+                    s_out = os.dup(1) # save stdout for later to restore
+                    fd_fout = os.open(out_file, os.O_WRONLY | os.O_CREAT) # Open file descriptor for a file
+                    os.dup2(fd_fout, 1) # Put file fd in stdout
+                    running = exec_child_process(cmd_args, False) # Execute the command
+                    os.dup2(s_out, 1) # Put in stdout back into stdout
+                    os.close(fd_fout)
+
+                elif '&' is keyboard[-1]: # Check if ampersand is at the end
+                    os.write(1, ('[%s] %d\n' % (keyboard.split()[0], os.getpid())).encode()) # Print the process name
+                    running = exec_child_process(keyboard[:-1], True) # Execute the command but don't wait for it
+
+                else:
+                    running = exec_child_process(keyboard, False)
+
+            else:
+                wait_p_fork = os.wait()
 
 
 '''
@@ -127,7 +122,8 @@ def parse_pipe_command(cmd_string):
         first_cmd = first_cmd.strip()
         second_cmd = second_cmd.strip()
         return first_cmd, second_cmd
-    else: return None, None
+    else:
+        return None, None
 
 '''
 Function for creating the grandchild processes that don't return.
@@ -137,7 +133,7 @@ def exec_child_process(command, background):
     if child_fork < 0:
         os.write(2, ('Could not fork process. Error code %d\n' & child_fork).encode())
         sys.exit(-1)
-    elif child_fork is 0:
+    if child_fork is 0:
         execute_command(command)
     else:
         # Background boolean to allow for shell to prompt again without waiting for command to finish.
