@@ -1,5 +1,15 @@
 #! /usr/bin/env python3
 
+'''
+Author: Jose Eduardo Soto
+
+Description: A shell that can do single commands, backgrounding, redirection, and singular piping. It is
+implemented by having grand-children processes. The grandparent process' responsibility is only for the shell
+prompt and commands for exiting and initiating the first child process. The first child is reponsible for handling
+the different kinds of commands possible (single, backgrounds, redirection, and piping). The final smaller child
+executes the commands with exec. They don't return.
+'''
+
 import os, sys, re
 
 
@@ -8,10 +18,12 @@ def main():
     running = True
 
     while running:
+
         keyboard = input()
         if not keyboard:                      # No input
             pass
-        if keyboard.strip() == 'exit':
+
+        if keyboard.strip() == 'exit':        # Exit command
             os.write(2, ('Exiting GoodShell\n'.encode()))
             running = False
             sys.exit(0)
@@ -26,58 +38,55 @@ def main():
             os.write(2, ('Could not fork process. Error code %d\n' % mc_fork).encode())
             sys.exit(-1)
 
+
+        '''
+        Midchild processing.
+        '''
         elif mc_fork == 0:
+            '''
+            Piping branch
+            '''
             if '|' in keyboard:
-                cmd1, cmd2 = parse_pipe_command(keyboard)
+                cmd1, cmd2 = parse_pipe_command(keyboard) # seperates the two commands
                 s_in = os.dup(0) #Save stdin for later, s_in is stacked in file descriptor
                 s_out = os.dup(1) #Save stdout for later, s_out is also stacked
                 fd_in = os.dup(s_in) #Variable for file descriptor input, created another to the stack
 
-                #Without loop
-                pipe_r, pipe_w = os.pipe()
-                os.dup2(pipe_w, 1)
-                running = exec_child_process(cmd1, True)
-                os.dup2(pipe_r, 0)
-                os.dup2(s_out, 1)
-                running = exec_child_process(cmd2, False)
-                os.dup2(s_in, 0)
+                # Without loop or chaining for multiple pipes.
+                pipe_r, pipe_w = os.pipe() # Get pipe file descriptors
+                os.dup2(pipe_w, 1) # Put in pipe write for stdout
+                running = exec_child_process(cmd1, True) # execute first command
+                os.dup2(pipe_r, 0) # Put in pipe read for stdin
+                os.dup2(s_out, 1) # Return stdout for stdout
+                running = exec_child_process(cmd2, False) # execute second command
+                os.dup2(s_in, 0) # Restore stdin for stdin
                 os.close(s_in)
                 os.close(s_out)
                 os.close(pipe_r)
                 os.close(pipe_w)
 
-                '''
-                for command in (cmd1, cmd2):
-                    os.dup2(fd_in, 0) #Set fd_in.
-                    if command is cmd1:
-                        fd_in, fd_out = os.pipe() #get new file descriptors by pipe
-                        os.dup2(fd_out, 1)
-                    else:
-                        os.dup2(fd_in,0)
-                        fd_out = os.dup(s_out) #set file descriptor to normal
-                    os.dup2(fd_out, 1)
-                    os.close(fd_out)
-
-                    running = exec_child_process(cmd1, False)
-
-                os.dup2(s_in, 0) #Restore the stdout and stdin
-                os.dup2(s_out, 1)
-                os.close(s_in)
-                os.close(s_out)'''
-
+            '''
+            Redirecting branch
+            '''
             elif '<' in keyboard or '>' in keyboard:
-                cmd_args, out_file, in_file = parse_rd_command(keyboard)
+                cmd_args, out_file, in_file = parse_rd_command(keyboard) # Parse out command
                 s_out = os.dup(1) # save stdout for later to restore
-                fd_fout = os.open(out_file, os.O_WRONLY | os.O_CREAT)
-                os.dup2(fd_fout, 1)
-                running = exec_child_process(cmd_args, False)
-                os.dup2(s_out, 1)
+                fd_fout = os.open(out_file, os.O_WRONLY | os.O_CREAT) # Open file descriptor for a file
+                os.dup2(fd_fout, 1) # Put file fd in stdout
+                running = exec_child_process(cmd_args, False) # Execute the command
+                os.dup2(s_out, 1) # Put in stdout back into stdout
                 os.close(fd_fout)
 
-            elif '&' is keyboard[-1]:
-                os.write(1, ('[%s] %d\n' % (keyboard.split()[0], os.getpid())).encode())
-                running = exec_child_process(keyboard[:-1], True)
+            '''
+            Background branch
+            '''
+            elif '&' is keyboard[-1]: # Check if ampersand is at the end
+                os.write(1, ('[%s] %d\n' % (keyboard.split()[0], os.getpid())).encode()) # Print the process name
+                running = exec_child_process(keyboard[:-1], True) # Execute the command but don't wait for it
 
+            '''
+            Single command branch
+            '''
             else: running = exec_child_process(keyboard, False)
 
         else:
@@ -109,6 +118,9 @@ def parse_rd_command(cmd_string):
 
     return cmd, out_file, in_file
 
+'''
+Simple method that seperates the two different commands that come from piping.
+'''
 def parse_pipe_command(cmd_string):
     if '|' in cmd_string:
         [first_cmd, second_cmd] = cmd_string.split('|', 1)
@@ -117,6 +129,9 @@ def parse_pipe_command(cmd_string):
         return first_cmd, second_cmd
     else: return None, None
 
+'''
+Function for creating the grandchild processes that don't return.
+'''
 def exec_child_process(command, background):
     child_fork = os.fork()
     if child_fork < 0:
@@ -125,14 +140,20 @@ def exec_child_process(command, background):
     elif child_fork is 0:
         execute_command(command)
     else:
+        # Background boolean to allow for shell to prompt again without waiting for command to finish.
         if not background:
             child_wait_fork = os.wait()
+        # Return code that allows exiting to be possible. Child processes won't allow for exiting w/o it.
         return False
 
+'''
+Method for finding the binaries for the commands throught the path directories. Executes the non-returning commands
+here.
+'''
 def execute_command(cmd):
     cmd = cmd.split()
     for dir in re.split(':', os.environ['PATH']):
-            # Execute the commands given with exec()
+            # Create the absolute path for calling the execute.
             executable = '%s/%s' % (dir, cmd[0])
             try:
                 os.execve(executable, cmd, os.environ)
