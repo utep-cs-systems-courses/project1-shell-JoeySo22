@@ -8,13 +8,50 @@
 
 import re, sys, os
 
-good_shell_label = ''
+
+'''
+Parse help from f20_os teams
+'''
+def parse_command(cmd_string):
+    out_file = None
+    in_file = None
+    cmd = ''
+
+    cmd_string = sub(' +', ' ', cmd_string)
+
+    if '>' in cmd_string:
+        [cmd, out_file] = cmd_string.split('>', 1)
+        out_file = out_file.strip()
+
+    if '<' in cmd:
+        [cmd, in_file] = cmd.split('<', 1)
+        in_file = in_file.strip()
+
+    elif out_file != None and '<' in out_file:
+        [out_file, in_file] = out_file.split('<', 1)
+        out_file = out_file.strip()
+        in_file = in_file.strip()
+
+    return cmd.split(), out_file, in_file
+
+def parse_pipe_command(cmd_string):
+    if '|' in cmd_string:
+        [first_cmd, second_cmd] = cmd_string.split('|', 1)
+        first_cmd = first_cmd.strip()
+        second_cmd = second_cmd.strip()
+        return first_cmd, second_cmd
+    else: return None, None
+
+
 running = True
 
+
 while running:
-    # Get input first
-    good_shell_label = '%s [%s] %s' % (os.environ['USER'], os.environ['PWD'], '$gs$ ')
-    keyboard = input(good_shell_label)
+
+    '''
+    Get input first
+    '''
+    keyboard = input()
     keyboard = keyboard.split()
     if not keyboard:
         pass
@@ -23,25 +60,62 @@ while running:
         running = False
         sys.exit(0)
         break
-    # Make the pipes
-    #pipe_read, pipe_write = os.pipe()
-    # Make a child process with fork
+    if keyboard[0] == 'cd':
+        if len(keyboard) < 2:
+            os.write(2, ('cd: no directory given').encode())
+            sys.exit(0)
+        else:
+            try:
+                os.chdir(os.path.abspath(keyboard[1]))
+            except Exception:
+                os.write(2, ('cd: no such file or directoy: {%s}' % (path))
+            pass
+    '''
+    Make the child process with fork. One to keep the shell process, another to branch into commands.
+    '''
     rc = os.fork()
-    # Fork fails
+
+    '''
+    Handle fork failure. The error should be loud and prompt the user again.
+    '''
     if rc < 0:
         os.write(2, ('Could not fork process. Error Code:\t%d' % rc).encode())
-        sys.exit(1)
-    # Fork successful. Has its own virtual memory. RC is zero so it is child
+        sys.exit(-1)
+
+    '''
+    Hanle fork success. Child will carry 0 in rc variable so we branch in here.
+    '''
     elif rc == 0:
-        if '>' in keyboard:
-            keyboard.remove('>')
-            os.close(1) # cut off display from output
-            os.open(keyboard[1], os.O_CREAT | os.O_WRONLY) # open file
-            os.set_inheritable(1, True)
-            del keyboard[1]
+
+        '''
+        Handler for piping
+        '''
         if '|' in keyboard:
-            pass # insert piping functionality here.
-        # Go through each directory in os path to find each program
+            first_command, second_command = parse_pipe_command(keyboard)
+            pipe_read, pipe_write = os.pipe()
+            for fd in (pipe_read, pipe_write):
+                os.set_inheritable(fd, True)
+
+        '''
+        Handler for redirections.
+        '''
+        if '>' in keyboard or '<' in keyboard:
+            cmd_with_args, output_file, input_file = parse_command(keyboard)
+            os.close(1) # cut off display from output
+            os.open(output_file, os.O_CREAT | os.O_WRONLY) # open file
+            os.set_inheritable(1, True)
+
+        '''
+        There are going to be two executes. One will pipe to another 
+        '''
+            os.close(1)
+            os.dup(pipe_write)
+
+
+
+        '''
+
+        '''
         for dir in re.split(':', os.environ['PATH']):
             # Execute the commands given with exec()
             executable = '%s/%s' % (dir, keyboard[0])
@@ -51,6 +125,10 @@ while running:
                 pass
         os.write(1, ('%s: command not found (gs)\n' % keyboard[0]).encode())
         sys.exit(-1)
+
+    '''
+    Parent part of fork handled here.
+    '''
     else:
         # Wait until child process dies.
         wait_rc = os.wait()

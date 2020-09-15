@@ -1,0 +1,123 @@
+#! /usr/bin/env python3
+
+import os, sys, re
+
+
+def main():
+
+    running = True
+
+    while running:
+        keyboard = input()
+        if not keyboard:                      # No input
+            pass
+        if keyboard.strip() == 'exit':
+            os.write(2, ('Exiting GoodShell pid:%d\n' % os.getpid()).encode())
+            running = False
+            sys.exit(0)
+            break
+
+        '''
+        Fork for midchild. Midchild handles the parsing and seperation of commands.
+        '''
+        mc_fork = os.fork()
+
+        if mc_fork < 0:
+            os.write(2, ('Could not fork process. Error code %d\n' % mc_fork).encode())
+            sys.exit(-1)
+
+        elif mc_fork == 0:
+            if '|' in keyboard:
+                cmd1, cmd2 = parse_pipe_command(keyboard)
+                s_in = os.dup(0) #Save stdin for later, s_in is stacked in file descriptor
+                s_out = os.dup(1) #Save stdout for later, s_out is also stacked
+                fd_in = os.dup(s_in) #Variable for file descriptor input, created another to the stack
+                for command in (cmd1, cmd2):
+                    os.dup2(fd_in, 0) #Set fd_in.
+                    os.close(fd_in) #fd_in goes away
+                    if command is cmd1:
+                        fd_in, fd_out = os.pipe() #get new file descriptors by pipe
+                    else:
+                        fd_out = os.dup(s_out) #set file descriptor to normal
+                    os.dup2(fd_out, 1)
+                    os.close(fd_out)
+
+                    '''
+                    Fork for grandchild. Handles executing the commands
+                    '''
+                    exec_child_process(cmd1)
+
+                os.dup2(s_in, 0) #Restore the stdout and stdin
+                os.dup2(s_out, 1)
+                os.close(s_in)
+                os.close(s_out)
+
+            elif '<' in keyboard or '>' in keyboard:
+                cmd_args, out_file, in_file = parse_rd_command(keyboard)
+                s_out = os.dup(1) # save stdout for later to restore
+                fd_fout = os.open(out_file, o.O_WRONLY | o.O_CREAT)
+                os.dup2(fd_fout, 1)
+                exec_child_process(cmd_args)
+                os.dup2(s_out, 1)
+                os.close(fd_fout)
+
+            else: exec_child_process(keyboard)
+
+        else:
+            wait_p_fork = os.wait()
+
+
+'''
+Parse help from f20_os teams
+'''
+def parse_rd_command(cmd_string):
+    out_file = None
+    in_file = None
+    cmd = ''
+
+    cmd_string = sub(' +', ' ', cmd_string)
+
+    if '>' in cmd_string:
+        [cmd, out_file] = cmd_string.split('>', 1)
+        out_file = out_file.strip()
+
+    if '<' in cmd:
+        [cmd, in_file] = cmd.split('<', 1)
+        in_file = in_file.strip()
+
+    elif out_file != None and '<' in out_file:
+        [out_file, in_file] = out_file.split('<', 1)
+        out_file = out_file.strip()
+        in_file = in_file.strip()
+
+    return cmd.split(), out_file, in_file
+
+def parse_pipe_command(cmd_string):
+    if '|' in cmd_string:
+        [first_cmd, second_cmd] = cmd_string.split('|', 1)
+        first_cmd = first_cmd.strip()
+        second_cmd = second_cmd.strip()
+        return first_cmd, second_cmd
+    else: return None, None
+
+def exec_child_process(command):
+    child_fork = os.fork()
+    if child_fork < 0:
+        os.write(2, ('Could not fork process. Error code %d\n' & child_fork).encode())
+        sys.exit(-1)
+    elif child_fork is 0:
+        execute_command(command)
+    else: child_wait_fork = os.wait()
+
+def execute_command(cmd):
+    for dir in re.split(':', os.environ['PATH']):
+            # Execute the commands given with exec()
+            executable = '%s/%s' % (dir, cmd)
+            try:
+                os.execve(executable, cmd.split(), os.environ)
+            except FileNotFoundError:
+                pass
+    os.write(1, ('%s: command not found (gs)\n' % cmd).encode())
+    sys.exit(-1)
+
+main()
