@@ -15,22 +15,29 @@ import os, sys, re
 
 def main():
 
+    prompt = sys.ps1 = '$ '
+
     running = True
 
     while running:
 
-        keyboard = input()
+        os.write(1, prompt.encode()) #Print prompt
+        keyboard = os.read(0,100).decode() #Wait for input and get rid of return character
 
-        if not keyboard:                      # No input
+        if keyboard is '\n':                      # No input
             pass
 
-        if keyboard.strip() == 'exit':        # Exit command
+        elif keyboard.strip() == 'exit':        # Exit command
+
             os.write(2, ('Exiting GoodShell\n'.encode()))
             running = False
             sys.exit(0)
             break
 
-        if keyboard.split()[0] == 'cd':       # Change directory command
+        elif len(keyboard.split()) == 0:
+            pass
+        elif keyboard.split()[0] == 'cd':       # Change directory command
+
             os.chdir(keyboard.split()[1])
             pass
         
@@ -42,6 +49,7 @@ def main():
             mc_fork = os.fork()
 
             if mc_fork < 0:
+
                 os.write(2, ('Could not fork process. Error code %d\n' % mc_fork).encode())
                 sys.exit(-1)
 
@@ -49,7 +57,9 @@ def main():
             Midchild processing.
             '''
             if mc_fork == 0:
+
                 if '|' in keyboard:
+
                     cmd1, cmd2 = parse_pipe_command(keyboard) # seperates the two commands
                     s_in = os.dup(0) #Save stdin for later, s_in is stacked in file descriptor
                     s_out = os.dup(1) #Save stdout for later, s_out is also stacked
@@ -69,6 +79,7 @@ def main():
                     os.close(pipe_w)
 
                 elif ('<' in keyboard) or ('>' in keyboard):
+
                     cmd_args, out_file, in_file = parse_rd_command(keyboard) # Parse out command
                     s_out = os.dup(1) # save stdout for later to restore
                     fd_fout = os.open(out_file, os.O_WRONLY | os.O_CREAT) # Open file descriptor for a file
@@ -77,9 +88,10 @@ def main():
                     os.dup2(s_out, 1) # Put in stdout back into stdout
                     os.close(fd_fout)
 
-                elif '&' is keyboard[-1]: # Check if ampersand is at the end
+                elif '&' is keyboard[-2]: # Check if ampersand is at the end
+
                     os.write(1, ('[%s] %d\n' % (keyboard.split()[0], os.getpid())).encode()) # Print the process name
-                    running = exec_child_process(keyboard[:-1], True) # Execute the command but don't wait for it
+                    running = exec_child_process(keyboard[:-2], True) # Execute the command but don't wait for it
 
                 else:
                     running = exec_child_process(keyboard, False)
@@ -91,7 +103,7 @@ def main():
 '''
 Parse help from f20_os teams
 '''
-def parse_rd_command(cmd_string):
+def parse_rd_command(cmd_string):  
     out_file = None
     in_file = None
     cmd = ''
@@ -148,6 +160,11 @@ here.
 '''
 def execute_command(cmd):
     cmd = cmd.split()
+    # Must try to run absolute path before running the path
+    try:
+        os.execve(cmd[0], cmd, os.environ)
+    except FileNotFoundError:
+        pass
     for dir in re.split(':', os.environ['PATH']):
             # Create the absolute path for calling the execute.
             executable = '%s/%s' % (dir, cmd[0])
