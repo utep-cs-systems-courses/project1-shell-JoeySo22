@@ -15,21 +15,26 @@ import os, sys, re
 
 def main():
 
-    prompt = sys.ps1 = '$ '
-
     running = True
 
     while running:
 
-        os.write(1, prompt.encode()) #Print prompt
+        try:
+            os.write(1, sys.ps1.encode()) #Print prompt
+        except Exception:
+            pass
+        
         keyboard = os.read(0,100).decode() #Wait for input and get rid of return character
 
-        if keyboard is '\n':                      # No input
+        if not keyboard:
+            running = False
+            sys.exit(0)
+
+        elif keyboard is '\n':                      # No input
             pass
 
         elif keyboard.strip() == 'exit':        # Exit command
 
-            os.write(2, ('Exiting GoodShell\n'.encode()))
             running = False
             sys.exit(0)
             break
